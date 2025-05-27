@@ -1,0 +1,7 @@
+sqlalchemy>=2.0
+psycopg2-binary
+pytest
+# use testcontainers for Postgres integration tests
+# this requires Docker and network access to pull images
+# tests will be skipped if Docker is unavailable
+"testcontainers[postgresql]"
