@@ -41,11 +41,11 @@ def get_db_params_from_env() -> Dict[str, str]:
     load_dotenv()  # Load .env file if present
 
     required_vars_map = {
-        'user': 'POSTGRES_USER',
-        'password': 'POSTGRES_PASSWORD',
-        'host': 'POSTGRES_HOST',
-        'port': 'POSTGRES_PORT',
-        'dbname': 'POSTGRES_DBNAME'
+        'user': 'DB_USER',
+        'password': 'DB_PASSWORD',
+        'host': 'DB_HOST',
+        'port': 'DB_PORT',
+        'dbname': 'DB_NAME'
     }
     
     db_params: Dict[str, str] = {}
