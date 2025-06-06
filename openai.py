@@ -1,15 +1,11 @@
-import subprocess
-import time
-import json
-import ollama
 import psycopg2
+import openai
+from openai import OpenAI
+import time
 import logging
-import requests
 import os
 from dotenv import load_dotenv
-from datetime import datetime
 
-# Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # Load environment variables
@@ -58,31 +54,32 @@ def parse_sentiment(response_content):
         # If no match is found, return 'unknown' or handle it as needed
         return 'unknown'
 
+openai.api_key = os.getenv('OPENAI_API_KEY')
 
-class OllamaModel:
+class Model():
     def __init__(self, model_name):
         self.model = model_name
-    
     def generate(self, prompt, max_tokens=3):
-        logging.info("prompt: " + prompt)
-        try:
-            response = ollama.chat(self.model, [
-                {
-                    'role': 'user',
-                    'content': prompt,
-                }
-            ])
-            out = parse_sentiment(response['message']['content'])
-            logging.info(out)
-            return out
-        except KeyError as e:
-            logging.error(f"KeyError: {e} - Response structure might have changed or be missing keys.")
-        except ConnectionError as e:
-            logging.error(f"ConnectionError: {e} - There might be an issue with the network connection.")
-        except Exception as e:
-            logging.error(f"An unexpected error occurred: {e}")
-        return None
-
+        client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
+        print(prompt)
+        response = client.chat.completions.create(
+            model= self.model,
+            messages=[
+                {"role": "system", "content": """You are a researcher helping me design the perfect prompt for sentiment analysis."""},
+                {"role": "user", "content": prompt}
+            ],
+            max_tokens=100,
+            n=1,
+            stop=None,
+            temperature=0.7
+        )
+        out = response.choices[0].message.content.strip()
+        print(out)
+        out = parse_sentiment(out)
+        print(out)
+        logging.info(out)
+        return out
+    
 
 def get_least_used_model_prompt_dataset(exclude_prompt_ids=[]):
     try:
@@ -92,9 +89,9 @@ def get_least_used_model_prompt_dataset(exclude_prompt_ids=[]):
         # Get the least used model-prompt-dataset combination, excluding the specified prompt IDs
         exclude_clause = ""
         if exclude_prompt_ids:
-            exclude_clause = f"AND mps.prompt_id NOT IN ({','.join(map(str, exclude_prompt_ids))})"
+            exclude_clause = f"AND mps.prompt_id IN ({','.join(map(str, exclude_prompt_ids))})"
 
-        library = 'ollama'
+        library = 'openai'
         
         cursor.execute(f"""
             SELECT mps.model_id, mps.prompt_id, mps.dataset_id, m.name, p.text, d.name AS dataset_name, mps.count, m.library
@@ -104,10 +101,22 @@ def get_least_used_model_prompt_dataset(exclude_prompt_ids=[]):
             JOIN Datasets d ON mps.dataset_id = d.dataset_id
             WHERE (mps.status = 'available' OR mps.status = 'in_use') 
             AND m.library = '{library}' {exclude_clause}
-            ORDER BY mps.count ASC
+            ORDER BY mps.model_id * RANDOM()
             LIMIT 1
         """)
         result = cursor.fetchone()
+        print(result)
+        print(f"""
+            SELECT mps.model_id, mps.prompt_id, mps.dataset_id, m.name, p.text, d.name AS dataset_name, mps.count, m.library
+            FROM ModelPromptStatus mps
+            JOIN Models m ON mps.model_id = m.model_id
+            JOIN Prompts p ON mps.prompt_id = p.prompt_id
+            JOIN Datasets d ON mps.dataset_id = d.dataset_id
+            WHERE (mps.status = 'available' OR mps.status = 'in_use') 
+            AND m.library = '{library}' {exclude_clause}
+            ORDER  mps.model_id * RANDOM()
+            LIMIT 1
+        """)
         
         if result:
             model_id, prompt_id, dataset_id, model_name, prompt_text, dataset_name, count, library = result
@@ -122,6 +131,7 @@ def get_least_used_model_prompt_dataset(exclude_prompt_ids=[]):
                 WHERE model_id = %s AND prompt_id = %s AND dataset_id = %s
             """, (model_id, prompt_id, dataset_id))
             
+
             cursor.execute("SELECT pg_advisory_unlock(%s)", (model_id,))
             
             conn.commit()
@@ -236,21 +246,6 @@ def decrement_count(model_id, prompt_id, dataset_id):
         if conn:
             conn.close()
 
-def start_ollama_service(model_name):
-    subprocess.Popen(["ollama", "run", model_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-
-def is_service_running(url, model,  timeout=10):
-    try:
-        data = {
-            "model": model,
-            "messages": [{'role': 'system', 'content': 'ping'}]
-        }
-        response = requests.post(url, json=data, timeout=timeout)
-        return response.status_code == 200
-    except requests.RequestException as e:
-        logging.error(f"Service check failed: {e}")
-        return False
-
 def main():
     exclude_prompt_ids = []
 
@@ -269,27 +264,9 @@ def main():
             exclude_prompt_ids.append(prompt_id)
             continue
 
-        model = OllamaModel(model_name)
+        model = Model(model_name)
         
         print(f"Using model: {model_name} with prompt: {prompt_text} on dataset: {dataset_name}")
-
-        start_ollama_service(model_name)
-        
-        check_url = "http://localhost:11434/api/generate"
-
-        # Wait for the service to start
-        max_retries = 300
-        retry_interval = 4  # seconds
-
-        for _ in range(max_retries):
-            if is_service_running(check_url, model_name):
-                logging.info("Service is running.")
-                break
-            logging.info("Waiting for service to start...")
-            time.sleep(retry_interval)
-        else:
-            logging.error("Service did not start in time.")
-            exit(1)
 
         while True:
             rows = fetch_batch(model_id, prompt_id, dataset_id)
@@ -311,12 +288,9 @@ def main():
                     formatted_prompt = prompt_text.format(content=content)
                     output = model.generate(formatted_prompt, max_tokens=3)
                     prediction_time = time.time() - start_time
-
-                    try:
-                        update_prediction(row_id, model_id, prompt_id, dataset_id, output, prediction_time, formatted_prompt)
-                    except:
-                        pass
-                    print(f"Processed row_id: {row_id} with model: {model_name}")
+                    update_prediction(row_id, model_id, prompt_id, dataset_id, output, prediction_time, formatted_prompt)
+                    
+                    logging.info(f"Processed row_id: {row_id} with model: {model_name}")
 
             except Exception as e:
                 print(f"Error occurred: {e}. Reverting batch status to 'pending'.")

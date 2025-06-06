@@ -16,4 +16,4 @@ EXPOSE 5000
 # Start the application
 # CMD ["/root/.local/bin/ollama", "serve"]
 
-CMD ["python", "open_ai.py"]
+CMD ["python", "openai.py"]
