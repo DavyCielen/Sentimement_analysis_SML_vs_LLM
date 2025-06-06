@@ -5,18 +5,23 @@ import ollama
 import psycopg2
 import logging
 import requests
+import os
+from dotenv import load_dotenv
 from datetime import datetime
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-# Database connection parameters
+# Load environment variables
+load_dotenv()
+
+# Database connection parameters loaded strictly from the environment
 db_params = {
-    'dbname': 'research',
-    'user': 'postgres',
-    'password': 'zuidermaas',
-    'host': 'database-1.c5ooi8kg6tie.eu-west-3.rds.amazonaws.com',
-    'port': '5432'  # Default PostgreSQL port
+    'dbname': os.getenv('DB_NAME'),
+    'user': os.getenv('DB_USER'),
+    'password': os.getenv('DB_PASSWORD'),
+    'host': os.getenv('DB_HOST'),
+    'port': os.getenv('DB_PORT'),
 }
 
 # Batch size for processing
