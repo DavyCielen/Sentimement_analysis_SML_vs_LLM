@@ -3,6 +3,10 @@ import openai
 from openai import OpenAI
 import time
 import logging
+import os
+from dotenv import load_dotenv
+
+load_dotenv() # Load environment variables from .env file
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -49,13 +53,13 @@ def parse_sentiment(response_content):
         # If no match is found, return 'unknown' or handle it as needed
         return 'unknown'
 
-openai.api_key = ''
+openai.api_key = os.getenv("OPENAI_API_KEY")
 
 class Model():
     def __init__(self, model_name):
         self.model = model_name
     def generate(self, prompt, max_tokens=3):
-        client = OpenAI(api_key='')
+        client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
         print(prompt)
         response = client.chat.completions.create(
             model= self.model,
